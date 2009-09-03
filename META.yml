@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Net-Ncap
-version:            1.00
+version:            1.01
 abstract:           Perl extension for the ncap(3) network data capture library.
 author:
     - Matt Sisk <sisk@cert.org>

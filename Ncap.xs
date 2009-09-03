@@ -87,9 +87,7 @@ callback_wrapper(ncap *nc, void *obj, ncap_msg *msg, const char *label) {
             newSV(0), "Net::Ncap::ncap_msg", (char *)inner
         ))); 
     }
-    if (label == NULL)
-        XPUSHs(&PL_sv_undef);
-    else
+    if (label != NULL)
         XPUSHs( sv_2mortal(newSVpvn(label, strlen(label))) );
     PUTBACK;
 
@@ -406,7 +404,7 @@ ncap_DESTROY(THIS)
 MODULE = Net::Ncap              PACKAGE = Net::Ncap::ncap_msg       PREFIX=ncap_msg_
 
 time_t
-ncap_msg_tv_sec(THIS)
+ncap_msg_sec(THIS)
         Net::Ncap::ncap_msg THIS
     PROTOTYPE: $
     CODE:
@@ -415,7 +413,7 @@ ncap_msg_tv_sec(THIS)
         RETVAL
 
 long int
-ncap_msg_tv_nsec(THIS)
+ncap_msg_nsec(THIS)
         Net::Ncap::ncap_msg THIS
     PROTOTYPE: $
     CODE:
@@ -442,7 +440,7 @@ ncap_msg_user2(THIS)
         RETVAL
 
 SV *
-ncap_msg_n_type(THIS)
+ncap_msg_nproto(THIS)
         Net::Ncap::ncap_msg THIS
     PROTOTYPE: $
     CODE:
@@ -457,7 +455,7 @@ ncap_msg_n_type(THIS)
     }
 
 SV *
-ncap_msg_t_type(THIS)
+ncap_msg_tproto(THIS)
         Net::Ncap::ncap_msg THIS
     PROTOTYPE: $
     CODE:
@@ -481,12 +479,21 @@ ncap_msg_t_type(THIS)
         break;
     }
 
+unsigned
+ncap_msg_paylen(THIS)
+        Net::Ncap::ncap_msg THIS
+    PROTOTYPE: $
+    CODE:
+        RETVAL = THIS->paylen;
+    OUTPUT:
+        RETVAL
+
 SV *
 ncap_msg_payload(THIS)
         Net::Ncap::ncap_msg THIS
     PROTOTYPE: $
     CODE:
-    ST(0) = newSVpvn((char *)&THIS->payload, THIS->paylen);
+    ST(0) = newSVpvn((char *)THIS->payload, THIS->paylen);
 
 SV *
 ncap_msg_src_packed(THIS)

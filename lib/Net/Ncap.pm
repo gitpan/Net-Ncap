@@ -17,14 +17,12 @@ use strict;
 use warnings;
 use Carp;
 
-our $VERSION = '1.00';
+our $VERSION = '1.01';
 
 use FileHandle;
 
 use XSLoader;
 XSLoader::load('Net::Ncap', $VERSION);
-
-use Net::Ncap::Msg;
 
 sub _pnum { (getprotobyname(shift))[-1] }
 
@@ -166,7 +164,7 @@ sub collect {
         $timeout_cb->();
     }
     else {
-      $callback->(shift);
+      $callback->(@_);
     }
   };
   $self->_handle(
@@ -194,6 +192,8 @@ sub send {
 
 package Net::Ncap::ncap_msg; {
 
+# extending the XS interface
+
 use strict;
 use warnings;
 
@@ -205,7 +205,7 @@ sub _ipv6_unpack { unpack('n8', shift) }
 
 sub src {
   my $self = shift;
-  my $np = $self->n_type;
+  my $np = $self->nproto;
   return [_ipv4_unpack($self->src_packed)] if $np == IPV4;
   return [_ipv6_unpack($self->src_packed)] if $np == IPV6;
   die "unknown network protocol '$np'\n";
@@ -213,7 +213,7 @@ sub src {
 
 sub dst {
   my $self = shift;
-  my $np = $self->n_type;
+  my $np = $self->nproto;
   return [_ipv4_unpack($self->dst_packed)] if $np == IPV4;
   return [_ipv6_unpack($self->dst_packed)] if $np == IPV6;
   die "unknown network protocol '$np'\n";
@@ -224,7 +224,7 @@ sub _ipv6_str { join(':', map { sprintf("%X") } @{shift()}) }
 
 sub sip {
   my $self = shift;
-  my $np = $self->n_type;
+  my $np = $self->nproto;
   return _ipv4_str($self->src) if $np == IPV4;
   return _ipv6_str($self->src) if $np == IPV6;
   die "unknown network protocol '$np'\n";
@@ -232,14 +232,16 @@ sub sip {
 
 sub dip {
   my $self = shift;
-  my $np = $self->n_type;
+  my $np = $self->nproto;
   return _ipv4_str($self->dst) if $np == IPV4;
   return _ipv6_str($self->dst) if $np == IPV6;
   die "unknown network protocol '$np'\n";
 }
 
-sub n_name { (getprotobynumber(shift->n_type))[0] }
-sub t_name { (getprotobynumber(shift->t_type))[0] }
+sub nname { (getprotobynumber(shift->nproto))[0] }
+sub tname { (getprotobynumber(shift->tproto))[0] }
+
+sub payload_ref { \(shift->payload) }
 
 
 }
@@ -257,29 +259,43 @@ Net::Ncap - Perl extension for the ncap(3) network data capture library.
 =head1 SYNOPSIS
 
   use Net::Ncap;
+  use Net::DNS::Packet;
   use FileHandle;
 
-  my $ncap = Net::Ncap->new();
+  # output file
+  my $fh = FileHandle->new('swag.ncap', '>');
+
+  # create ncap object
+  my $nc = Net::Ncap->new;
 
   # add a filter specification
   $ncap->filter('dns');
 
   # add a network interface for live listening
-  $ncap->add_if('eth0');
+  $ncap->add_if(shift || 'eth0');
 
-  my $fh = FileHandle->new('swag.ncap', '>');
+  # define the callback
+  sub cb {
+    my $m = shift;
 
-  # define a callback
-  my $cb = sub {
-    my $msg = shift;
-    printf("%s:%d -> %s:%d",
-           $msg->sip, $msg->sport,
-           $msg->dip, $msg->dport);
-    $ncap->write($msg, $fh);
-  };
+    # save to ncap file
+    $ncap->write($m, $fh);
+
+    # example of parsing packet
+    my $pkt = Net::DNS::Packet->new($m->payload_ref) || return;
+    my $q = ($pkt->question)[0];
+    my @answers = $pkt->answer;
+    print join(',',
+      $m->sec,   $m->nsec,
+      $m->sip,   $m->dip,
+      $m->sport, $m->dport,
+      $q->qtype, $q->qname,
+      @answers ? join(' -- ', map { $_->string } @answers) : ()
+    ), "\n";
+  }
 
   # collect the data
-  $ncap->collect($cb);
+  $nc->collect(\&cb);
 
 
 =head1 DESCRIPTION
@@ -489,29 +505,45 @@ IPv6 this is colon-hexadecimal.
 
 The destination IP address as a string, as above.
 
-=item tv_sec()
+=item sport()
+
+The source port of the datagram. (undef for icmp)
+
+=item dport()
+
+The destination port of the datagram. (undef for icmp)
+
+=item sec()
 
 The seconds component of the datagram timestamp.
 
-=item tv_nsec()
+=item nsec()
 
 The nanoseconds component of the datagram timestamp.
 
-=item n_type()
+=item nproto()
 
 The numeric network protocol type (IP or IPV6)
 
-=item t_type()
+=item tproto()
 
 The numeric transport protocol type (UDP, TCP, or ICMP)
 
-=item n_name()
+=item nname()
 
 The network protocol name
 
-=item t_name()
+=item tname()
 
 The transport protocol name
+
+=item payload()
+
+The binary (network format) record (for example, the DNS record)
+
+=item payload_ref()
+
+A scalar reference to the payload string.
 
 =item user1()
 
@@ -529,14 +561,6 @@ The ICMP type of the datagram. (undef for udp/tcp)
 
 The ICMP code of the datagram. (undef for udp/tcp)
 
-=item sport()
-
-The source port of the datagram. (undef for icmp)
-
-=item dport()
-
-The destination port of the datagram. (undef for icmp)
-
 =item offset()
 
 The TCP offset of the datagram. (undef for icmp/udp)
@@ -549,7 +573,14 @@ The TCP flags of the datagram. (undef for icmp/udp)
 
 =head1 SEE ALSO
 
-ncap(3), pcap(3), Net::Pcap(3)
+L<ncap(3)>, L<pcap(3)>, L<Net::Pcap>
+
+The C<Net::Ncap> project page: L<http://tools.netsa.cert.org/wiki/display/tt/Net-Ncap>
+
+The ncap library can be downloaded from: L<ftp://ftp.isc.org/isc/ncap/>
+
+The pcap library can be downloaded from: L<http://www.tcpdump.org/>
+
 
 =head1 AUTHOR
 
@@ -559,10 +590,14 @@ Matthew Sisk, E<lt>sisk@cert.orgE<gt>
 
 Copyright (C) 2009 by Carnegie Mellon University
 
-This library is free software; you can redistribute it and/or modify
-it under the terms of the following licenses:
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License, as published by
+the Free Software Foundation, under the terms pursuant to Version 2,
+June 1991.
 
-GNU Public License (GPL) Rights pursuant to Version 2, June 1991
-Government Purpose License Rights (GPLR) pursuant to DFARS 252.225-7013
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+Public License for more details.
 
 =cut
